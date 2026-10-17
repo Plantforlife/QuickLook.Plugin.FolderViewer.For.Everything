@@ -43,7 +43,7 @@ namespace QuickLook.Plugin.FolderViewer
             if (outcome.WasTruncated)
             {
                 entries.Add(FileEntry.CreateNotice(
-                    $"仅显示前 {limit:N0} 项。打开文件夹可查看其余项目。"));
+                    Strings.Format("TruncatedNotice", limit.ToString("N0"))));
             }
 
             return new DirectoryReadResult(entries, outcome.ErrorCode, outcome.WasTruncated);

@@ -25,7 +25,7 @@
             <StackPanel x:Name="rootLoading" HorizontalAlignment="Center"
                         VerticalAlignment="Center">
                 <ProgressBar Width="150" Height="4" IsIndeterminate="True" />
-                <TextBlock Margin="0,10,0,0" Text="正在读取文件夹..."
+                <TextBlock Margin="0,10,0,0" Text="{local:Translate ReadingFolder}"
                            HorizontalAlignment="Center"
                            Foreground="{DynamicResource WindowTextForegroundAlternative}" />
             </StackPanel>
@@ -44,19 +44,17 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
+            <!-- Initial "calculating..." text is set in code: it combines two translated strings. -->
             <TextBlock x:Name="totalSize" Grid.Column="0" VerticalAlignment="Center"
-                       Text="总大小：计算中..."
                        Foreground="{DynamicResource WindowTextForegroundAlternative}" />
             <TextBlock x:Name="numFolders" Grid.Column="1" VerticalAlignment="Center"
-                       Text="文件夹：计算中..."
                        Foreground="{DynamicResource WindowTextForegroundAlternative}" />
             <TextBlock x:Name="numFiles" Grid.Column="2" VerticalAlignment="Center"
-                       Text="文件：计算中..."
                        Foreground="{DynamicResource WindowTextForegroundAlternative}" />
             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                 <ProgressBar x:Name="statisticsProgress" Width="48" Height="3"
                              Margin="0,0,8,0" IsIndeterminate="True" />
-                <TextBlock x:Name="statisticsStatus" Text="正在开始..."
+                <TextBlock x:Name="statisticsStatus" Text="{local:Translate Status_Starting}"
                            Foreground="{DynamicResource WindowTextForegroundAlternative}" />
             </StackPanel>
         </Grid>

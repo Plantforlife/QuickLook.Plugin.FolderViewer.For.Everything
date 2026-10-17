@@ -13,9 +13,10 @@ namespace QuickLook.Plugin.FolderViewer
     {
         private static readonly IReadOnlyList<FileEntry> EmptyChildren = Array.Empty<FileEntry>();
         private static readonly IReadOnlyList<FileEntry> LoadingChildren =
-            new[] { new FileEntry("加载中...", EntryKind.Placeholder) };
+            new[] { new FileEntry(Strings.Get("Loading"), EntryKind.Placeholder) };
 
         private IReadOnlyList<FileEntry> _children;
+        private bool _isExpanded;
         private int _loadState;
         private long? _size;
 
@@ -52,6 +53,23 @@ namespace QuickLook.Plugin.FolderViewer
         public bool IsPlaceholder => Kind == EntryKind.Placeholder;
 
         public bool IsReparsePoint { get; }
+
+        /// <summary>
+        /// Bound two-way to TreeViewItem.IsExpanded, so the expanded state survives the item
+        /// containers being regenerated when the list is re-sorted.
+        /// </summary>
+        public bool IsExpanded
+        {
+            get => _isExpanded;
+            set
+            {
+                if (_isExpanded == value)
+                    return;
+
+                _isExpanded = value;
+                OnPropertyChanged();
+            }
+        }
 
         public bool IsLoading => Volatile.Read(ref _loadState) == 1;
 
@@ -110,6 +128,22 @@ namespace QuickLook.Plugin.FolderViewer
             Volatile.Write(ref _loadState, 2);
             OnPropertyChanged(nameof(Children));
             OnPropertyChanged(nameof(IsLoading));
+        }
+
+        /// <summary>
+        /// Re-sorts already loaded children (recursively). Folders that were never expanded
+        /// are sorted when they load.
+        /// </summary>
+        internal void ApplySort(FileEntrySorter sorter)
+        {
+            if (!IsFolder || Volatile.Read(ref _loadState) != 2 || _children.Count == 0)
+                return;
+
+            _children = sorter.Sort(_children);
+            OnPropertyChanged(nameof(Children));
+
+            foreach (var child in _children)
+                child.ApplySort(sorter);
         }
 
         public void SetIndexedSize(long size)

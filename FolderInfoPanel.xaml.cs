@@ -28,6 +28,11 @@ namespace QuickLook.Plugin.FolderViewer
             _cancellationToken = _cancellation.Token;
             InitializeComponent();
 
+            var calculating = Strings.Get("Stat_Calculating");
+            totalSize.Text = Strings.Format("Stat_TotalSize", calculating);
+            numFolders.Text = Strings.Format("Stat_Folders", calculating);
+            numFiles.Text = Strings.Format("Stat_Files", calculating);
+
             Resources.MergedDictionaries.Clear();
             fileListView.Configure(LoadChildrenAsync, _cancellationToken);
 
@@ -66,7 +71,9 @@ namespace QuickLook.Plugin.FolderViewer
                     fileListView.SetItems(result.Entries);
                     QueueFolderSizeLookups(result.Entries);
                     rootLoading.Visibility = Visibility.Collapsed;
-                    statisticsStatus.Text = result.WasTruncated ? "预览已截断" : "就绪";
+                    statisticsStatus.Text = result.WasTruncated
+                        ? Strings.Get("Status_PreviewTruncated")
+                        : Strings.Get("Status_Ready");
                     LoadStatisticsAsync();
                 });
             }
@@ -78,10 +85,10 @@ namespace QuickLook.Plugin.FolderViewer
                 await RunOnUiThreadAsync(() =>
                 {
                     rootLoading.Visibility = Visibility.Collapsed;
-                    rootError.Text = "无法读取此文件夹。\n" + exception.Message;
+                    rootError.Text = Strings.Get("CannotReadFolder") + "\n" + exception.Message;
                     rootError.Visibility = Visibility.Visible;
                     statisticsProgress.Visibility = Visibility.Collapsed;
-                    statisticsStatus.Text = "不可用";
+                    statisticsStatus.Text = Strings.Get("Status_Unavailable");
                 });
             }
         }
@@ -119,7 +126,11 @@ namespace QuickLook.Plugin.FolderViewer
             {
                 var result = await _folderSizeProvider.QueryAsync(entry.FullPath, _cancellationToken);
                 if (!_disposed && result.IsSuccess)
-                    await RunOnUiThreadAsync(() => entry.SetIndexedSize(result.Size));
+                    await RunOnUiThreadAsync(() =>
+                    {
+                        entry.SetIndexedSize(result.Size);
+                        fileListView.NotifySizeChanged();
+                    });
             }
             catch (OperationCanceledException)
             {
@@ -146,19 +157,19 @@ namespace QuickLook.Plugin.FolderViewer
                     if (result.HasSize)
                     {
                         _indexedTotalSize = result.Size;
-                        totalSize.Text = "总大小：" + ByteSizeFormatter.Format(result.Size);
+                        totalSize.Text = Strings.Format("Stat_TotalSize", ByteSizeFormatter.Format(result.Size));
                         totalSize.ToolTip = result.Source;
                     }
 
                     if (result.HasCounts)
                     {
                         _indexedCounts = true;
-                        numFolders.Text = "文件夹：" + result.DirectoryCount.ToString("N0");
-                        numFiles.Text = "文件：" + result.FileCount.ToString("N0");
+                        numFolders.Text = Strings.Format("Stat_Folders", result.DirectoryCount.ToString("N0"));
+                        numFiles.Text = Strings.Format("Stat_Files", result.FileCount.ToString("N0"));
                     }
 
                     if (result.HasSize || result.HasCounts)
-                        statisticsStatus.Text = "Everything 索引";
+                        statisticsStatus.Text = Strings.Get("Status_EverythingIndex");
                 });
 
                 return result;
@@ -189,7 +200,7 @@ namespace QuickLook.Plugin.FolderViewer
                     await RunOnUiThreadAsync(() =>
                     {
                         statisticsProgress.Visibility = Visibility.Collapsed;
-                        statisticsStatus.Text = "Everything 索引";
+                        statisticsStatus.Text = Strings.Get("Status_EverythingIndex");
                     });
                     return;
                 }
@@ -198,14 +209,15 @@ namespace QuickLook.Plugin.FolderViewer
                 {
                     await RunOnUiThreadAsync(() =>
                     {
-                        numFolders.Text = "文件夹：未扫描";
-                        numFiles.Text = "文件：未扫描";
+                        var notScanned = Strings.Get("Stat_NotScanned");
+                        numFolders.Text = Strings.Format("Stat_Folders", notScanned);
+                        numFiles.Text = Strings.Format("Stat_Files", notScanned);
                         if (!_indexedTotalSize.HasValue)
-                            totalSize.Text = "总大小：未扫描";
+                            totalSize.Text = Strings.Format("Stat_TotalSize", notScanned);
                         statisticsProgress.Visibility = Visibility.Collapsed;
                         statisticsStatus.Text = _indexedTotalSize.HasValue || _indexedCounts
-                            ? "Everything 索引"
-                            : "网络文件夹";
+                            ? Strings.Get("Status_EverythingIndex")
+                            : Strings.Get("Status_NetworkFolder");
                     });
                     return;
                 }
@@ -234,7 +246,7 @@ namespace QuickLook.Plugin.FolderViewer
                 await RunOnUiThreadAsync(() =>
                 {
                     statisticsProgress.Visibility = Visibility.Collapsed;
-                    statisticsStatus.Text = "统计不可用";
+                    statisticsStatus.Text = Strings.Get("Status_StatsUnavailable");
                     statisticsStatus.ToolTip = exception.Message;
                 });
             }
@@ -263,22 +275,22 @@ namespace QuickLook.Plugin.FolderViewer
 
             if (!_indexedCounts)
             {
-                numFolders.Text = "文件夹：" + statistics.DirectoryCount.ToString("N0");
-                numFiles.Text = "文件：" + statistics.FileCount.ToString("N0");
+                numFolders.Text = Strings.Format("Stat_Folders", statistics.DirectoryCount.ToString("N0"));
+                numFiles.Text = Strings.Format("Stat_Files", statistics.FileCount.ToString("N0"));
             }
             if (!_indexedTotalSize.HasValue)
-                totalSize.Text = "总大小：" + ByteSizeFormatter.Format(statistics.TotalSize);
+                totalSize.Text = Strings.Format("Stat_TotalSize", ByteSizeFormatter.Format(statistics.TotalSize));
 
             if (statistics.IsComplete)
             {
                 statisticsProgress.Visibility = Visibility.Collapsed;
                 statisticsStatus.Text = statistics.InaccessibleDirectoryCount == 0
-                    ? (_indexedTotalSize.HasValue ? "索引大小" : "完成")
-                    : $"已跳过：{statistics.InaccessibleDirectoryCount:N0}";
+                    ? (_indexedTotalSize.HasValue ? Strings.Get("Status_IndexedSize") : Strings.Get("Status_Done"))
+                    : Strings.Format("Status_Skipped", statistics.InaccessibleDirectoryCount.ToString("N0"));
             }
             else
             {
-                statisticsStatus.Text = "统计中...";
+                statisticsStatus.Text = Strings.Get("Status_Counting");
             }
         }
 

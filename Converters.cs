@@ -15,8 +15,10 @@ namespace QuickLook.Plugin.FolderViewer
             if (value == null || value == DependencyProperty.UnsetValue)
                 return string.Empty;
 
+            // WPF passes the element's Language here (en-US unless set), not the user's
+            // regional settings, so format with CurrentCulture like Explorer does.
             return value is long size && size >= 0
-                ? ByteSizeFormatter.Format(size, culture ?? CultureInfo.CurrentCulture)
+                ? ByteSizeFormatter.Format(size, CultureInfo.CurrentCulture)
                 : string.Empty;
         }
 
@@ -33,7 +35,8 @@ namespace QuickLook.Plugin.FolderViewer
             if (!(value is DateTime date) || date == DateTime.MinValue)
                 return string.Empty;
 
-            return date.ToString("g", culture ?? CultureInfo.CurrentCulture);
+            // See SizePrettyPrintConverter: use the user's regional format, not WPF's en-US default.
+            return date.ToString("g", CultureInfo.CurrentCulture);
         }
 
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)

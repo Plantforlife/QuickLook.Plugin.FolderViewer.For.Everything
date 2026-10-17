@@ -60,9 +60,26 @@
                 <ColumnDefinition Width="110" />
                 <ColumnDefinition Width="170" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="1" Text="名称" VerticalAlignment="Center" />
-            <TextBlock Grid.Column="2" Text="大小" VerticalAlignment="Center" />
-            <TextBlock Grid.Column="3" Text="修改时间" VerticalAlignment="Center" />
+            <!-- Click a header to sort by it; click again to reverse. Transparent background
+                 makes the whole cell clickable, not just the glyphs. -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Background="Transparent"
+                        Cursor="Hand" Tag="{x:Static local:SortColumn.Name}"
+                        MouseLeftButtonUp="OnHeaderClick">
+                <TextBlock Text="{local:Translate Header_Name}" VerticalAlignment="Center" />
+                <TextBlock x:Name="nameArrow" Margin="5,0,0,0" FontSize="9" VerticalAlignment="Center" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Background="Transparent"
+                        Cursor="Hand" Tag="{x:Static local:SortColumn.Size}"
+                        MouseLeftButtonUp="OnHeaderClick">
+                <TextBlock Text="{local:Translate Header_Size}" VerticalAlignment="Center" />
+                <TextBlock x:Name="sizeArrow" Margin="5,0,0,0" FontSize="9" VerticalAlignment="Center" />
+            </StackPanel>
+            <StackPanel Grid.Column="3" Orientation="Horizontal" Background="Transparent"
+                        Cursor="Hand" Tag="{x:Static local:SortColumn.Modified}"
+                        MouseLeftButtonUp="OnHeaderClick">
+                <TextBlock Text="{local:Translate Header_Modified}" VerticalAlignment="Center" />
+                <TextBlock x:Name="modifiedArrow" Margin="5,0,0,0" FontSize="9" VerticalAlignment="Center" />
+            </StackPanel>
         </Grid>
 
         <TreeView Grid.Row="1" x:Name="treeView"
@@ -80,6 +97,7 @@
                     <Setter Property="Foreground"
                             Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TreeView}}" />
                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
                     <EventSetter Event="Expanded" Handler="OnItemExpanded" />
                     <EventSetter Event="MouseDoubleClick" Handler="OnItemMouseDoubleClick" />
                 </Style>

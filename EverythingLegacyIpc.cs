@@ -52,6 +52,20 @@ namespace QuickLook.Plugin.FolderViewer
                 return false;
 
             var normalizedPath = path.TrimEnd('\\', '/');
+
+            // A folder outside Everything's index (e.g. an exFAT drive that is not added as a
+            // folder index, or an excluded folder) makes the descendant queries "succeed" with
+            // 0 results. Only trust the counts if Everything knows the folder itself.
+            if (!receiver.TryQueryCount(
+                    everythingWindow,
+                    "folder:wfn:\"" + normalizedPath + "\"",
+                    cancellationToken,
+                    out var selfCount) ||
+                selfCount == 0)
+            {
+                return false;
+            }
+
             var pathSearch = "path:\"" + normalizedPath + "\\\"";
             var success = receiver.TryQueryCount(
                        everythingWindow,

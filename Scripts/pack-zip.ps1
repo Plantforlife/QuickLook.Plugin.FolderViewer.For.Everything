@@ -14,6 +14,7 @@ $files = @(
     Get-Item (Join-Path $releaseDirectory 'QuickLook.Plugin.FolderViewer.For.Everything.dll')
     Get-Item (Join-Path $releaseDirectory 'QuickLook.Plugin.Metadata.config')
     Get-Item (Join-Path $releaseDirectory 'THIRD_PARTY_NOTICES.txt')
+    Get-Item (Join-Path $releaseDirectory 'Translations.config')
 )
 Compress-Archive -Path $files.FullName -DestinationPath $temporaryZip
 Move-Item $temporaryZip $outputPath
