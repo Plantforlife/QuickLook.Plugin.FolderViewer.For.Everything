@@ -15,7 +15,7 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition />
-            <RowDefinition Height="34" />
+            <RowDefinition Height="Auto" MinHeight="34" />
         </Grid.RowDefinitions>
 
         <Grid Grid.Row="0">
@@ -34,29 +34,27 @@
                        Margin="32" HorizontalAlignment="Center" VerticalAlignment="Center"
                        TextWrapping="Wrap" TextAlignment="Center"
                        Foreground="{DynamicResource WindowTextForegroundAlternative}" />
+            <Button x:Name="retryRead" Visibility="Collapsed" Content="{local:Translate Retry}"
+                    Click="OnRetryRead" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="12" />
         </Grid>
 
-        <Grid Grid.Row="1" Margin="12,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="2*" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+        <WrapPanel Grid.Row="1" Margin="12,0">
 
             <!-- Initial "calculating..." text is set in code: it combines two translated strings. -->
-            <TextBlock x:Name="totalSize" Grid.Column="0" VerticalAlignment="Center"
+            <TextBlock x:Name="totalSize" Margin="0,6,20,6" VerticalAlignment="Center"
                        Foreground="{DynamicResource WindowTextForegroundAlternative}" />
-            <TextBlock x:Name="numFolders" Grid.Column="1" VerticalAlignment="Center"
+            <TextBlock x:Name="numFolders" Margin="0,6,20,6" VerticalAlignment="Center"
                        Foreground="{DynamicResource WindowTextForegroundAlternative}" />
-            <TextBlock x:Name="numFiles" Grid.Column="2" VerticalAlignment="Center"
+            <TextBlock x:Name="numFiles" Margin="0,6,20,6" VerticalAlignment="Center"
                        Foreground="{DynamicResource WindowTextForegroundAlternative}" />
-            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+            <StackPanel Margin="0,6,0,6" Orientation="Horizontal" VerticalAlignment="Center">
                 <ProgressBar x:Name="statisticsProgress" Width="48" Height="3"
                              Margin="0,0,8,0" IsIndeterminate="True" />
                 <TextBlock x:Name="statisticsStatus" Text="{local:Translate Status_Starting}"
                            Foreground="{DynamicResource WindowTextForegroundAlternative}" />
+                <Button x:Name="continueScan" Visibility="Collapsed" Margin="8,0,0,0"
+                        Content="{local:Translate ContinueScan}" Click="OnContinueStatistics" />
             </StackPanel>
-        </Grid>
+        </WrapPanel>
     </Grid>
 </UserControl>

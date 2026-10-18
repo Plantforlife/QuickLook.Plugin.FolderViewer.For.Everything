@@ -17,8 +17,9 @@ namespace QuickLook.Plugin.FolderViewer
 
         private IReadOnlyList<FileEntry> _children;
         private bool _isExpanded;
+        private bool _isSelected;
         private int _loadState;
-        private long? _size;
+        private long _size = -1;
 
         public FileEntry(
             string name,
@@ -31,7 +32,7 @@ namespace QuickLook.Plugin.FolderViewer
         {
             FullPath = fullPath;
             IsReparsePoint = isReparsePoint;
-            _size = size;
+            _size = size ?? -1;
             ModifiedDate = modifiedDate;
         }
 
@@ -67,11 +68,23 @@ namespace QuickLook.Plugin.FolderViewer
                     return;
 
                 _isExpanded = value;
+                LastAccessUtc = DateTime.UtcNow;
                 OnPropertyChanged();
             }
         }
 
         public bool IsLoading => Volatile.Read(ref _loadState) == 1;
+        internal bool IsLoaded => Volatile.Read(ref _loadState) == 2;
+        internal DateTime LastAccessUtc { get; private set; } = DateTime.UtcNow;
+        internal FileEntry Parent { get; set; }
+        internal int ChildrenVersion { get; private set; }
+        internal int LoadGeneration { get; private set; }
+        internal FileEntrySorter AppliedSort { get; set; }
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set { if (_isSelected != value) { _isSelected = value; OnPropertyChanged(); } }
+        }
 
         public EntryKind Kind { get; }
 
@@ -81,13 +94,16 @@ namespace QuickLook.Plugin.FolderViewer
 
         public long? Size
         {
-            get => _size;
+            get
+            {
+                var value = Interlocked.Read(ref _size);
+                return value < 0 ? (long?)null : value;
+            }
             private set
             {
-                if (_size == value)
+                var number = value ?? -1;
+                if (Interlocked.Exchange(ref _size, number) == number)
                     return;
-
-                _size = value;
                 OnPropertyChanged();
             }
         }
@@ -117,6 +133,9 @@ namespace QuickLook.Plugin.FolderViewer
         public void CompleteLoading(IReadOnlyList<FileEntry> children)
         {
             _children = children ?? EmptyChildren;
+            foreach (var child in _children) child.Parent = this;
+            ChildrenVersion++;
+            LoadGeneration++;
             Volatile.Write(ref _loadState, 2);
             OnPropertyChanged(nameof(Children));
             OnPropertyChanged(nameof(IsLoading));
@@ -125,7 +144,8 @@ namespace QuickLook.Plugin.FolderViewer
         public void FailLoading(string message)
         {
             _children = new[] { CreateNotice(message) };
-            Volatile.Write(ref _loadState, 2);
+            ChildrenVersion++;
+            Volatile.Write(ref _loadState, 0); // collapse/re-expand retries a failed read
             OnPropertyChanged(nameof(Children));
             OnPropertyChanged(nameof(IsLoading));
         }
@@ -136,14 +156,36 @@ namespace QuickLook.Plugin.FolderViewer
         /// </summary>
         internal void ApplySort(FileEntrySorter sorter)
         {
-            if (!IsFolder || Volatile.Read(ref _loadState) != 2 || _children.Count == 0)
+            if (!IsFolder || !IsExpanded || Volatile.Read(ref _loadState) != 2 || _children.Count == 0)
                 return;
 
             _children = sorter.Sort(_children);
+            AppliedSort = sorter;
+            ChildrenVersion++;
             OnPropertyChanged(nameof(Children));
 
             foreach (var child in _children)
                 child.ApplySort(sorter);
+        }
+
+        internal void ReplaceChildren(IReadOnlyList<FileEntry> children, FileEntrySorter sorter)
+        {
+            _children = children;
+            AppliedSort = sorter;
+            ChildrenVersion++;
+            OnPropertyChanged(nameof(Children));
+        }
+
+        internal bool EvictChildren()
+        {
+            if (IsExpanded || IsLoading || !IsLoaded) return false;
+            _children = LoadingChildren;
+            AppliedSort = null;
+            ChildrenVersion++;
+            LoadGeneration++;
+            Volatile.Write(ref _loadState, 0);
+            OnPropertyChanged(nameof(Children));
+            return true;
         }
 
         public void SetIndexedSize(long size)

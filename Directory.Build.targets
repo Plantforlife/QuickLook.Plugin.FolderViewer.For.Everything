@@ -1,0 +1,8 @@
+<Project>
+  <!-- Classic WPF creates a temporary project with a random filename. Reuse the
+       real project's restored imports so it also sees the net462 reference pack. -->
+  <Import Project="$(MSBuildThisFileDirectory)obj\QuickLook.Plugin.FolderViewer.For.Everything.csproj.nuget.g.props"
+          Condition="$(MSBuildProjectName.EndsWith('_wpftmp')) And Exists('$(MSBuildThisFileDirectory)obj\QuickLook.Plugin.FolderViewer.For.Everything.csproj.nuget.g.props')" />
+  <Import Project="$(MSBuildThisFileDirectory)obj\QuickLook.Plugin.FolderViewer.For.Everything.csproj.nuget.g.targets"
+          Condition="$(MSBuildProjectName.EndsWith('_wpftmp')) And Exists('$(MSBuildThisFileDirectory)obj\QuickLook.Plugin.FolderViewer.For.Everything.csproj.nuget.g.targets')" />
+</Project>

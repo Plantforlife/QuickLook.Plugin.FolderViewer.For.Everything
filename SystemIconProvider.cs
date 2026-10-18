@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -19,26 +22,59 @@ namespace QuickLook.Plugin.FolderViewer
         private const uint ShgfiSmallIcon = 0x000000001;
         private const uint ShgfiUseFileAttributes = 0x000000010;
 
-        private static readonly Dictionary<string, ImageSource> Cache =
-            new Dictionary<string, ImageSource>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, Task<ImageSource>> Cache =
+            new Dictionary<string, Task<ImageSource>>(StringComparer.OrdinalIgnoreCase);
         private static readonly object CacheLock = new object();
+        private static readonly BlockingCollection<Action> Work = new BlockingCollection<Action>(128);
+        public static readonly ImageSource Placeholder = CreatePlaceholder();
+
+        static SystemIconProvider()
+        {
+            var thread = new Thread(() =>
+            {
+                var initialized = CoInitializeEx(IntPtr.Zero, 2) >= 0;
+                try { foreach (var work in Work.GetConsumingEnumerable()) work(); }
+                finally { if (initialized) CoUninitialize(); }
+            }) { IsBackground = true, Name = "FolderViewer icons" };
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+        }
 
         public static ImageSource GetIcon(string fullPath, bool isFolder)
         {
+            var task = GetIconAsync(fullPath, isFolder, 16);
+            return task.Status == TaskStatus.RanToCompletion ? task.Result : Placeholder;
+        }
+
+        public static Task<ImageSource> GetIconAsync(string fullPath, bool isFolder, int pixels)
+        {
+            pixels = pixels <= 16 ? 16 : pixels <= 24 ? 24 : pixels <= 32 ? 32 : pixels <= 48 ? 48 : 64;
             var key = isFolder ? "<folder>" : GetExtensionKey(fullPath);
+            var cacheKey = key + ":" + pixels;
             lock (CacheLock)
             {
-                if (Cache.TryGetValue(key, out var cached))
+                if (Cache.TryGetValue(cacheKey, out var cached))
                     return cached;
                 if (Cache.Count >= MaximumCachedIcons)
-                    key = isFolder ? "<folder>" : "<file>";
-                if (Cache.TryGetValue(key, out cached))
-                    return cached;
-
-                var icon = LoadIcon(key, isFolder);
-                Cache[key] = icon;
-                return icon;
+                    Cache.Clear();
+                var completion = new TaskCompletionSource<ImageSource>(TaskCreationOptions.RunContinuationsAsynchronously);
+                if (!Work.TryAdd(() =>
+                {
+                    try { completion.TrySetResult(LoadIcon(key, isFolder, pixels) ?? Placeholder); }
+                    catch { completion.TrySetResult(Placeholder); }
+                })) return Task.FromResult(Placeholder);
+                Cache[cacheKey] = completion.Task;
+                return completion.Task;
             }
+        }
+
+        private static ImageSource CreatePlaceholder()
+        {
+            var drawing = new GeometryDrawing(Brushes.LightGray, new Pen(Brushes.Gray, 1),
+                new RectangleGeometry(new Rect(2, 1, 11, 14)));
+            var image = new DrawingImage(drawing);
+            image.Freeze();
+            return image;
         }
 
         private static string GetExtensionKey(string path)
@@ -56,7 +92,7 @@ namespace QuickLook.Plugin.FolderViewer
             }
         }
 
-        private static ImageSource LoadIcon(string key, bool isFolder)
+        private static ImageSource LoadIcon(string key, bool isFolder, int pixels)
         {
             var attributes = isFolder ? FileAttributeDirectory : FileAttributeNormal;
             var lookupName = isFolder ? "folder" : "file" + (key.StartsWith("<", StringComparison.Ordinal) ? string.Empty : key);
@@ -66,7 +102,7 @@ namespace QuickLook.Plugin.FolderViewer
                 attributes,
                 out info,
                 (uint)Marshal.SizeOf(typeof(SHFILEINFO)),
-                ShgfiIcon | ShgfiSmallIcon | ShgfiUseFileAttributes);
+                ShgfiIcon | (pixels <= 16 ? ShgfiSmallIcon : 0) | ShgfiUseFileAttributes);
 
             if (result == IntPtr.Zero || info.hIcon == IntPtr.Zero)
                 return null;
@@ -76,7 +112,7 @@ namespace QuickLook.Plugin.FolderViewer
                 var source = Imaging.CreateBitmapSourceFromHIcon(
                     info.hIcon,
                     Int32Rect.Empty,
-                    BitmapSizeOptions.FromWidthAndHeight(16, 16));
+                    BitmapSizeOptions.FromWidthAndHeight(pixels, pixels));
                 source.Freeze();
                 return source;
             }
@@ -103,6 +139,8 @@ namespace QuickLook.Plugin.FolderViewer
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool DestroyIcon(IntPtr hIcon);
+        [DllImport("ole32.dll")] private static extern int CoInitializeEx(IntPtr reserved, uint mode);
+        [DllImport("ole32.dll")] private static extern void CoUninitialize();
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct SHFILEINFO

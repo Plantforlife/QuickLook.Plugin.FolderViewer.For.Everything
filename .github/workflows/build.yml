@@ -1,0 +1,39 @@
+name: Build and regression tests
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        architecture: [x64, x86]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build against .NET Framework 4.6.2
+        shell: pwsh
+        run: msbuild QuickLook.Plugin.FolderViewer.For.Everything.sln -restore /t:Rebuild /p:Configuration=Release '/p:Platform=Any CPU' /p:PlatformTarget=${{ matrix.architecture }} /v:minimal /nologo
+      - name: Regression tests
+        shell: pwsh
+        run: ./Tests/bin/Release/QuickLook.Plugin.FolderViewer.Tests.exe
+  package:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build AnyCPU plugin
+        shell: pwsh
+        run: msbuild QuickLook.Plugin.FolderViewer.For.Everything.sln -restore /t:Rebuild /p:Configuration=Release '/p:Platform=Any CPU' /v:minimal /nologo
+      - name: Package
+        shell: pwsh
+        run: ./Scripts/pack-zip.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FolderViewer-AnyCPU
+          path: '*.qlplugin'

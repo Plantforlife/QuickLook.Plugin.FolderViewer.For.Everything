@@ -20,12 +20,10 @@ namespace QuickLook.Plugin.FolderViewer
         public static bool TryGetFolderSize(
             string path,
             CancellationToken cancellationToken,
-            out long size)
+            out long size, string instance = null)
         {
             size = 0;
-            var everythingWindow = FindWindow(WindowClass15, null);
-            if (everythingWindow == IntPtr.Zero)
-                everythingWindow = FindWindow(WindowClass, null);
+            var everythingWindow = FindEverythingWindow(instance);
             if (everythingWindow == IntPtr.Zero)
                 return false;
 
@@ -37,13 +35,11 @@ namespace QuickLook.Plugin.FolderViewer
             string path,
             CancellationToken cancellationToken,
             out long directoryCount,
-            out long fileCount)
+            out long fileCount, string instance = null)
         {
             directoryCount = 0;
             fileCount = 0;
-            var everythingWindow = FindWindow(WindowClass15, null);
-            if (everythingWindow == IntPtr.Zero)
-                everythingWindow = FindWindow(WindowClass, null);
+            var everythingWindow = FindEverythingWindow(instance);
             if (everythingWindow == IntPtr.Zero)
                 return false;
 
@@ -51,7 +47,7 @@ namespace QuickLook.Plugin.FolderViewer
             if (receiver == null)
                 return false;
 
-            var normalizedPath = path.TrimEnd('\\', '/');
+            var normalizedPath = PathPolicy.ForQuery(path).TrimEnd('\\', '/');
 
             // A folder outside Everything's index (e.g. an exFAT drive that is not added as a
             // folder index, or an excluded folder) makes the descendant queries "succeed" with
@@ -78,6 +74,14 @@ namespace QuickLook.Plugin.FolderViewer
                        cancellationToken,
                        out fileCount);
             return success;
+        }
+
+        private static IntPtr FindEverythingWindow(string instance)
+        {
+            if (instance != null)
+                return FindWindow(instance.Length == 0 ? WindowClass : WindowClass + "_(" + instance + ")", null);
+            var window = FindWindow(WindowClass15, null);
+            return window == IntPtr.Zero ? FindWindow(WindowClass, null) : window;
         }
 
         private static ReceiverWindow GetReceiver(CancellationToken cancellationToken)

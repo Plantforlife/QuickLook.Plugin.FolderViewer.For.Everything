@@ -12,7 +12,7 @@ using QuickLook.Common.Plugin;
 
 namespace QuickLook.Plugin.FolderViewer.Tests
 {
-    internal static class Program
+    internal static partial class Program
     {
         private static int _failed;
 
@@ -21,6 +21,12 @@ namespace QuickLook.Plugin.FolderViewer.Tests
         {
             if (args.Length != 0 && args[0] == "--benchmark")
                 return RunBenchmarks(args.Length > 1 ? args[1] : Environment.SystemDirectory);
+            if (args.Length > 1 && args[0] == "--render")
+            {
+                if (args.Length > 2) Thread.CurrentThread.CurrentUICulture = CultureInfo.GetCultureInfo(args[2]);
+                WithDispatcher(() => RenderPreview(args[1]));
+                return 0;
+            }
 
             Run("byte size formatting", TestByteSizeFormatting);
             Run("entry ordering and load gate", TestEntryOrderingAndLoadGate);
@@ -35,6 +41,22 @@ namespace QuickLook.Plugin.FolderViewer.Tests
             Run("Everything query deadline", TestEverythingQueryDeadline);
             Run("plugin lifecycle", TestPluginLifecycle);
             Run("Everything IPC (optional)", TestEverythingIpc);
+            Run("extended and UNC path policy", TestPathPolicy);
+            Run("scan budget and resume", TestScanResume);
+            Run("lightweight statistics entries", TestStatisticsEntries);
+            Run("Everything sessions and instances", TestEndpoints);
+            Run("queued queries and reusable connection", TestQueuedQueries);
+            Run("bounded size queue and priority", () => WithDispatcher(TestSizeQueue));
+            Run("sort selection and collapsed branches", () => WithDispatcher(TestAsyncSorting));
+            Run("tree cache budget and reload", () => WithDispatcher(TestTreeCache));
+            Run("network partial statistics", TestPartialNetworkStatistics);
+            Run("bounded I/O and timeout", TestIoIsolation);
+            Run("asynchronous DPI icons", TestAsyncIcons);
+            Run("long paths under legacy CLR switches", TestLongPaths);
+            Run("first preview batch", TestFirstBatch);
+            Run("nested selection and overlapping sorts", () => WithDispatcher(TestNestedSorting));
+            Run("translations and culture fallback", TestTranslations);
+            Run("stale statistics callbacks", () => WithDispatcher(TestStaleStatistics));
 
             Console.WriteLine();
             Console.WriteLine(_failed == 0 ? "All tests passed." : _failed + " test(s) failed.");
@@ -76,6 +98,8 @@ namespace QuickLook.Plugin.FolderViewer.Tests
                 }
             }
 
+            RunQueueBenchmark();
+            WithDispatcher(RunUiBenchmark);
             return 0;
         }
 

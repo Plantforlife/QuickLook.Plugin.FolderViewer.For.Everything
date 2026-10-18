@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <IncludePackageReferencesDuringMarkupCompilation>true</IncludePackageReferencesDuringMarkupCompilation>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Compile the plugin, tests and QuickLook.Common against the same net462 contract,
+         including on build machines without the old targeting pack installed. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net462" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

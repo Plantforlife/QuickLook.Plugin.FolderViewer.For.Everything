@@ -33,10 +33,15 @@ namespace QuickLook.Plugin.FolderViewer
 
         public bool CanHandle(string path)
         {
-            if (Path.GetPathRoot(path) == path)
-                return false;
-
-            return Directory.Exists(path);
+            if (PathPolicy.IsRoot(path)) return false;
+            try
+            {
+                var attributes = DirectoryEnumerator.ReadAttributes(path);
+                return attributes != uint.MaxValue && (attributes & 0x10) != 0;
+            }
+            catch (Exception error) when (error is ArgumentException || error is IOException ||
+                error is NotSupportedException || error is System.ComponentModel.Win32Exception ||
+                error is System.Security.SecurityException) { return false; }
         }
 
         public void Prepare(string path, ContextObject context)

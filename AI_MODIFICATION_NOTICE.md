@@ -2,7 +2,7 @@
 
 ## 中文声明
 
-> **本项目是对原版 `QuickLook.Plugin.FolderViewer` 的 AI 二次开发版本。本分支新增、重构和优化的代码均由 OpenAI GPT-5.6 Sol 模型通过 Codex 生成并迭代完善。**
+> **本项目是对原版 `QuickLook.Plugin.FolderViewer` 的 AI 二次开发版本。本分支新增、重构和优化的代码均由 OpenAI 模型通过 Codex（初版为 GPT-5.6 Sol） 生成并迭代完善。**
 
 本项目基于 [adyanth/QuickLook.Plugin.FolderViewer](https://github.com/adyanth/QuickLook.Plugin.FolderViewer) 进行增强，主要目标是提高文件夹预览速度，并利用 [Everything](https://www.voidtools.com/) 索引快速提供文件夹大小及递归文件、文件夹数量。
 
@@ -21,18 +21,18 @@
 | Everything 异常 | 不适用 | 具备 500 ms 查询预算、取消、超时、畸形回复验证和自动回退 |
 | 本地统计回退 | 与目录树构建耦合 | 独立、低优先级、可取消的后台统计，不延迟目录列表 |
 | 网络文件夹 | 可能触发昂贵的递归读取 | 不自动递归扫描网络路径 |
-| 重解析点 | 可能造成额外遍历或循环风险 | 递归统计跳过重解析点，索引统计会一致地解析本地 junction 目标 |
+| 重解析点 | 可能造成额外遍历或循环风险 | 递归统计跳过链接、未知标签和需召回的云目录，允许遍历已下载的云目录；索引统计一致地解析本地 junction 目标 |
 | 文件图标 | 可能对每个文件触发 Shell 图标或缩略图处理 | 按扩展名和文件夹类型缓存通用系统图标 |
 | 超大目录 | 没有明确的单层显示保护 | 每层最多显示 25,000 项，并使用 WPF Recycling Virtualization |
 | UI 语言 | 英文界面 | 表头、加载提示、状态和底部统计均已汉化 |
 | 生命周期 | 使用简单停止标记，异步清理边界较弱 | 支持取消、幂等清理、重复 `View()` 和 Dispatcher 安全更新 |
 | 错误处理 | 覆盖范围有限 | 处理访问拒绝、路径删除、长路径、取消、IPC 断开和窗口关闭竞争 |
-| 测试 | 缺少针对性能及 IPC 的回归测试 | 提供 13 项自动化测试、WPF 预览工具及真实 Everything 集成测试 |
+| 测试 | 缺少针对性能及 IPC 的回归测试 | 提供自动化回归测试、WPF 预览工具及真实 Everything 集成测试，最新验证见 VALIDATION.md |
 | 打包 | 基础打包流程 | 确定性版本、干净的插件压缩包及 Everything 协议第三方声明 |
 
 ### 性能参考
 
-以下数据来自开发机器，仅作为参考，不代表所有电脑上的固定结果：
+以下为初版开发机器的历史数据，仅作为参考；当前改进的验证记录见 [VALIDATION.md](VALIDATION.md)：
 
 - `C:\Windows\System32`：3,027 个首层项目的枚举和排序约为 **5.10 至 5.98 ms**。
 - Everything 汇总统计：冷查询约 **127 ms**，热查询约 **6.8 至 7.5 ms**。
@@ -55,7 +55,7 @@ Everything 不可用时，文件夹列表仍会正常显示。本插件不会为
 
 ## English Notice
 
-> **This project is an AI-modified fork of `QuickLook.Plugin.FolderViewer`. All code newly introduced, refactored, or optimized in this fork was generated and iteratively refined by OpenAI GPT-5.6 Sol through Codex.**
+> **This project is an AI-modified fork of `QuickLook.Plugin.FolderViewer`. All code newly introduced, refactored, or optimized in this fork was generated and iteratively refined by OpenAI models through Codex (initially GPT-5.6 Sol).**
 
 This fork is based on [adyanth/QuickLook.Plugin.FolderViewer](https://github.com/adyanth/QuickLook.Plugin.FolderViewer). Its main goals are to reduce folder-preview latency and to use the [Everything](https://www.voidtools.com/) index for fast folder sizes and recursive file/folder counts.
 
@@ -74,18 +74,18 @@ The human maintainer supplied the requirements, selected the intended behavior, 
 | Everything failures | Not applicable | Uses a 500 ms budget, cancellation, timeouts, malformed-response validation, and automatic fallback |
 | Local statistics fallback | Coupled to directory-tree construction | Detached, cancellable, low-priority background statistics that do not delay the listing |
 | Network folders | Could trigger expensive recursive work | Never starts an automatic recursive network scan |
-| Reparse points | Could add traversal cost or loop risk | Recursive statistics skip reparse points; indexed statistics consistently resolve local junction targets |
+| Reparse points | Could add traversal cost or loop risk | Statistics skip links, unknown tags and cloud directories requiring recall, while traversing hydrated cloud directories; indexed statistics resolve local junction targets consistently |
 | File icons | Could invoke Shell icon or thumbnail processing for individual files | Caches generic system icons by extension and folder type |
 | Very large folders | No explicit per-level display guard | Limits each displayed level to 25,000 items and enables WPF recycling virtualization |
 | UI language | English UI | Headers, loading text, status messages, and footer statistics are localized in Simplified Chinese |
 | Lifecycle | Simple stop flag with fragile asynchronous cleanup boundaries | Owned cancellation, idempotent cleanup, repeated `View()` safety, and dispatcher-aware updates |
 | Error handling | Limited coverage | Handles inaccessible folders, deleted paths, long paths, cancellation, IPC disconnects, and shutdown races |
-| Testing | No focused performance or IPC regression suite | Includes 13 automated tests, a WPF preview harness, and real Everything integration checks |
+| Testing | No focused performance or IPC regression suite | Includes automated regression tests, a WPF preview harness, and real Everything integration checks; see VALIDATION.md for current results |
 | Packaging | Basic packaging | Deterministic versioning, validated clean archives, and third-party notices for the Everything protocol |
 
 ### Reference Performance
 
-The following measurements were collected on the development machine and are not universal guarantees:
+The following historical measurements describe the initial version on its development machine. See [VALIDATION.md](VALIDATION.md) for current validation:
 
 - `C:\Windows\System32`: 3,027 first-level entries enumerated and sorted in approximately **5.10 to 5.98 ms**.
 - Everything aggregate statistics: approximately **127 ms cold** and **6.8 to 7.5 ms warm**.

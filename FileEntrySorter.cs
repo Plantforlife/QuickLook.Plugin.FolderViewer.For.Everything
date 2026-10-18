@@ -23,7 +23,9 @@ namespace QuickLook.Plugin.FolderViewer
         {
             Column = column;
             Descending = descending;
+            _names = StringComparer.CurrentCultureIgnoreCase;
         }
+        private readonly StringComparer _names;
 
         public SortColumn Column { get; }
 
@@ -65,8 +67,29 @@ namespace QuickLook.Plugin.FolderViewer
 
         public IReadOnlyList<FileEntry> Sort(IEnumerable<FileEntry> entries)
         {
-            // OrderBy is stable, so equal items keep their current relative order.
-            return entries == null ? Array.Empty<FileEntry>() : entries.OrderBy(e => e, this).ToArray();
+            if (entries == null) return Array.Empty<FileEntry>();
+            // Sizes can arrive while a background sort runs. Snapshot keys so comparisons
+            // remain transitive; a later size notification schedules the next version.
+            var keys = entries.Select((e, i) => new SortKey(e, i)).ToArray();
+            Array.Sort(keys, (a, b) =>
+            {
+                var rank = Rank(a.Entry).CompareTo(Rank(b.Entry));
+                if (rank != 0) return rank;
+                var result = Column == SortColumn.Size ? a.Size.CompareTo(b.Size) :
+                    Column == SortColumn.Modified ? a.Entry.ModifiedDate.CompareTo(b.Entry.ModifiedDate) : 0;
+                if (result == 0) result = CompareNames(a.Entry, b.Entry);
+                if (Descending) result = -result;
+                return result == 0 ? a.Index.CompareTo(b.Index) : result;
+            });
+            return Array.ConvertAll(keys, k => k.Entry);
+        }
+
+        private readonly struct SortKey
+        {
+            public SortKey(FileEntry entry, int index) { Entry = entry; Index = index; Size = entry.Size ?? -1; }
+            public FileEntry Entry { get; }
+            public int Index { get; }
+            public long Size { get; }
         }
 
         private static int Rank(FileEntry entry)
@@ -82,9 +105,9 @@ namespace QuickLook.Plugin.FolderViewer
             }
         }
 
-        private static int CompareNames(FileEntry x, FileEntry y)
+        private int CompareNames(FileEntry x, FileEntry y)
         {
-            var result = StringComparer.CurrentCultureIgnoreCase.Compare(x.Name, y.Name);
+            var result = _names.Compare(x.Name, y.Name);
             return result != 0 ? result : StringComparer.Ordinal.Compare(x.Name, y.Name);
         }
     }

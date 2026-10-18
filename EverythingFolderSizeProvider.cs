@@ -4,7 +4,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -16,33 +15,42 @@ namespace QuickLook.Plugin.FolderViewer
     internal sealed class EverythingFolderSizeProvider : IDisposable
     {
         private const int QueryBudgetMilliseconds = 500;
-        private static readonly string[] DefaultPipeNames = { "Everything IPC", "Everything IPC (1.5a)" };
         private readonly Dictionary<string, FolderSizeQueryResult> _cache =
             new Dictionary<string, FolderSizeQueryResult>(StringComparer.OrdinalIgnoreCase);
-        private readonly string[] _pipeNames;
+        private readonly EverythingEndpoint[] _endpoints;
         private readonly SemaphoreSlim _queryLock = new SemaphoreSlim(1, 1);
+        private readonly CancellationTokenSource _lifetime = new CancellationTokenSource();
+        private readonly CancellationToken _lifetimeToken;
+        private Sdk3Client _client;
+        private EverythingEndpoint _preferred;
+        private DateTime _retryAfter;
+        private readonly bool _allowLegacy;
         private volatile bool _disposed;
 
         public EverythingFolderSizeProvider()
         {
-            _pipeNames = DefaultPipeNames;
+            _lifetimeToken = _lifetime.Token;
+            _endpoints = EverythingEndpoint.Defaults();
+            _allowLegacy = true;
         }
 
         internal EverythingFolderSizeProvider(params string[] pipeNames)
         {
+            _lifetimeToken = _lifetime.Token;
             if (pipeNames == null || pipeNames.Length == 0)
                 throw new ArgumentException("At least one pipe name is required.", nameof(pipeNames));
 
-            _pipeNames = (string[])pipeNames.Clone();
+            _endpoints = Array.ConvertAll(pipeNames, p => new EverythingEndpoint(p, null));
         }
 
         public async Task<FolderSizeQueryResult> QueryAsync(string path, CancellationToken cancellationToken)
         {
+            if (_disposed) return FolderSizeQueryResult.Unavailable;
             if (string.IsNullOrWhiteSpace(path))
                 return FolderSizeQueryResult.Unavailable;
 
-            var queryCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            queryCancellation.CancelAfter(QueryBudgetMilliseconds);
+            path = PathPolicy.ForQuery(path);
+            var queryCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetimeToken);
             var lockTaken = false;
             var disposeCancellation = true;
             try
@@ -51,6 +59,8 @@ namespace QuickLook.Plugin.FolderViewer
                 {
                     await _queryLock.WaitAsync(queryCancellation.Token).ConfigureAwait(false);
                     lockTaken = true;
+                    // Waiting for another row is not time spent communicating with Everything.
+                    queryCancellation.CancelAfter(QueryBudgetMilliseconds);
                 }
                 catch (OperationCanceledException)
                 {
@@ -62,10 +72,9 @@ namespace QuickLook.Plugin.FolderViewer
                     return FolderSizeQueryResult.Unavailable;
                 if (_cache.TryGetValue(path, out var cached))
                     return cached;
+                if (DateTime.UtcNow < _retryAfter) return FolderSizeQueryResult.Unavailable;
 
-                var queryTask = Task.Run(
-                    () => QueryCore(path, queryCancellation.Token),
-                    CancellationToken.None);
+                var queryTask = IoWorker.Index.Enqueue(token => QueryCore(path, token), queryCancellation.Token);
                 var completedTask = await Task.WhenAny(
                     queryTask,
                     Task.Delay(Timeout.Infinite, queryCancellation.Token)).ConfigureAwait(false);
@@ -73,6 +82,11 @@ namespace QuickLook.Plugin.FolderViewer
                 {
                     disposeCancellation = false;
                     ObserveAndDispose(queryTask, queryCancellation);
+                    // A timed-out OS call may still be unwinding. Keep ownership of the
+                    // persistent connection until that worker actually exits.
+                    lockTaken = false;
+                    _ = queryTask.ContinueWith(t => _queryLock.Release(), CancellationToken.None,
+                        TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                     cancellationToken.ThrowIfCancellationRequested();
                     return FolderSizeQueryResult.Unavailable;
                 }
@@ -87,10 +101,14 @@ namespace QuickLook.Plugin.FolderViewer
                     cancellationToken.ThrowIfCancellationRequested();
                     return FolderSizeQueryResult.Unavailable;
                 }
+                catch (InvalidOperationException) { return FolderSizeQueryResult.Unavailable; }
 
                 cancellationToken.ThrowIfCancellationRequested();
                 if (result.IsSuccess)
+                {
+                    if (_cache.Count >= 2048) _cache.Clear();
                     _cache[path] = result;
+                }
                 return result;
             }
             finally
@@ -106,7 +124,8 @@ namespace QuickLook.Plugin.FolderViewer
             string path,
             CancellationToken cancellationToken)
         {
-            var queryCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            if (_disposed) return default(FolderAggregateQueryResult);
+            var queryCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetimeToken);
             queryCancellation.CancelAfter(QueryBudgetMilliseconds);
             var disposeCancellation = true;
             var queryPath = path;
@@ -114,9 +133,8 @@ namespace QuickLook.Plugin.FolderViewer
             var counts = CountQueryResult.Unavailable;
             try
             {
-                var resolveTask = Task.Run(
-                    () => ResolveAggregateQueryPath(path),
-                    CancellationToken.None);
+                var resolveTask = IoWorker.Preview.RunAsync(
+                    token => ResolveAggregateQueryPath(path), queryCancellation.Token, TimeSpan.FromMilliseconds(500));
                 var resolvedTask = await Task.WhenAny(
                     resolveTask,
                     Task.Delay(Timeout.Infinite, queryCancellation.Token)).ConfigureAwait(false);
@@ -132,15 +150,16 @@ namespace QuickLook.Plugin.FolderViewer
                 sizeResult = await QueryAsync(queryPath, queryCancellation.Token).ConfigureAwait(false);
                 queryCancellation.Token.ThrowIfCancellationRequested();
 
-                var countTask = Task.Run(() =>
+                var instance = _preferred?.Instance ?? Environment.GetEnvironmentVariable("FOLDERVIEWER_EVERYTHING_INSTANCE");
+                var countTask = IoWorker.Index.Enqueue(token =>
                 {
                     var success = EverythingLegacyIpc.TryGetDescendantCounts(
                         queryPath,
-                        queryCancellation.Token,
+                        token,
                         out var directoryCount,
-                        out var fileCount);
+                        out var fileCount, instance);
                     return new CountQueryResult(success, directoryCount, fileCount);
-                }, CancellationToken.None);
+                }, queryCancellation.Token);
                 var completedTask = await Task.WhenAny(
                     countTask,
                     Task.Delay(Timeout.Infinite, queryCancellation.Token)).ConfigureAwait(false);
@@ -159,6 +178,8 @@ namespace QuickLook.Plugin.FolderViewer
             {
                 cancellationToken.ThrowIfCancellationRequested();
             }
+            catch (TimeoutException) { }
+            catch (InvalidOperationException) { }
             finally
             {
                 if (disposeCancellation)
@@ -176,7 +197,11 @@ namespace QuickLook.Plugin.FolderViewer
 
         public void Dispose()
         {
+            if (_disposed) return;
             _disposed = true;
+            _lifetime.Cancel();
+            _client?.Dispose();
+            _lifetime.Dispose();
         }
 
         private FolderSizeQueryResult QueryCore(string path, CancellationToken cancellationToken)
@@ -185,11 +210,38 @@ namespace QuickLook.Plugin.FolderViewer
             for (var attempt = 0; attempt < 2; attempt++)
             {
                 var retryResolvedPath = false;
-                foreach (var pipeName in _pipeNames)
+                var responsive = false;
+                var endpoints = new List<EverythingEndpoint>();
+                if (_preferred != null) endpoints.Add(_preferred);
+                foreach (var endpoint in _endpoints)
+                    if (!ReferenceEquals(endpoint, _preferred)) endpoints.Add(endpoint);
+                foreach (var endpoint in endpoints)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (!TryQuerySdk3Pipe(pipeName, queryPath, cancellationToken, out var size))
+                    if (_client == null || !ReferenceEquals(endpoint, _preferred))
+                    {
+                        _client?.Dispose();
+                        _client = new Sdk3Client(endpoint.Pipe);
+                    }
+                    var success = _client.TryQuery(queryPath, cancellationToken, out var size);
+                    if (!success && !_client.Responded)
+                    {
+                        _client.Dispose();
+                        _client = new Sdk3Client(endpoint.Pipe);
+                        success = _client.TryQuery(queryPath, cancellationToken, out size);
+                    }
+                    if (_client.Responded)
+                    {
+                        responsive = true;
+                        _preferred = endpoint;
+                    }
+                    if (!success)
+                    {
+                        if (responsive) break; // an unindexed path is not an endpoint failure
+                        _client.Dispose();
+                        _client = null;
                         continue;
+                    }
                     if (size != 0 || !IsReparsePoint(queryPath))
                         return new FolderSizeQueryResult(true, size, "Everything 1.5 index");
                     if (attempt == 0 && TryResolveLocalPath(queryPath, out var resolvedPath))
@@ -206,10 +258,10 @@ namespace QuickLook.Plugin.FolderViewer
                     continue;
 
                 cancellationToken.ThrowIfCancellationRequested();
-                if (EverythingLegacyIpc.TryGetFolderSize(
+                if (_allowLegacy && EverythingLegacyIpc.TryGetFolderSize(
                     queryPath,
                     cancellationToken,
-                    out var legacySize))
+                    out var legacySize, _preferred?.Instance ?? Environment.GetEnvironmentVariable("FOLDERVIEWER_EVERYTHING_INSTANCE")))
                 {
                     if (legacySize != 0 || !IsReparsePoint(queryPath))
                         return new FolderSizeQueryResult(true, legacySize, "Everything index");
@@ -220,92 +272,51 @@ namespace QuickLook.Plugin.FolderViewer
                     }
                 }
 
+                if (!responsive) _retryAfter = DateTime.UtcNow.AddSeconds(2);
                 return FolderSizeQueryResult.Unavailable;
             }
 
             return FolderSizeQueryResult.Unavailable;
         }
 
-        private static string ResolveAggregateQueryPath(string path)
+        internal static string ResolveAggregateQueryPath(string path)
         {
+            path = PathPolicy.ForQuery(path);
             if (DirectoryStatisticsScanner.IsNetworkPath(path) || !IsReparsePoint(path))
                 return path;
 
             return TryResolveLocalPath(path, out var resolvedPath) ? resolvedPath : path;
         }
 
-        internal static bool TryQuerySdk3Pipe(
-            string pipeName,
-            string path,
-            CancellationToken cancellationToken,
-            out long size)
+        internal static bool TryQuerySdk3Pipe(string pipeName, string path,
+            CancellationToken cancellationToken, out long size)
         {
-            size = 0;
-            try
+            using (var client = new Sdk3Client(pipeName))
+            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
-                using (var pipe = new NamedPipeClientStream(
-                    ".",
-                    pipeName,
-                    PipeDirection.InOut,
-                    PipeOptions.Asynchronous))
-                using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                timeout.CancelAfter(QueryBudgetMilliseconds);
+                try { return client.TryQuery(path, timeout.Token, out size); }
+                catch (OperationCanceledException)
                 {
-                    timeout.CancelAfter(500);
-                    using (timeout.Token.Register(pipe.Dispose))
-                    {
-                    pipe.Connect(0);
-                    var pathBytes = Encoding.UTF8.GetBytes(path);
-                    var header = new byte[8];
-                    WriteUInt32(header, 0, 18);
-                    WriteUInt32(header, 4, checked((uint)pathBytes.Length));
-                    pipe.Write(header, 0, header.Length);
-                    pipe.Write(pathBytes, 0, pathBytes.Length);
-                    pipe.Flush();
-
-                    if (!ReadExactly(pipe, header, 0, header.Length))
-                        return FailIfNotCancelled(cancellationToken);
-
-                    var responseCode = ReadUInt32(header, 0);
-                    var responseLength = ReadUInt32(header, 4);
-                    if ((responseCode != 100 && responseCode != 200) || responseLength != 8)
-                        return FailIfNotCancelled(cancellationToken);
-
-                    var payload = new byte[8];
-                    if (!ReadExactly(pipe, payload, 0, payload.Length))
-                        return FailIfNotCancelled(cancellationToken);
-
-                    var unsignedSize = ReadUInt64(payload, 0);
-                    if (unsignedSize == ulong.MaxValue)
-                        return false;
-
-                    size = unsignedSize > long.MaxValue ? long.MaxValue : (long)unsignedSize;
-                    return true;
-                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    size = 0;
+                    return false;
                 }
             }
-            catch (Exception exception) when (
-                exception is IOException ||
-                exception is TimeoutException ||
-                exception is UnauthorizedAccessException ||
-                exception is InvalidOperationException ||
-                exception is ObjectDisposedException)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                return false;
-            }
         }
-
         private static bool IsReparsePoint(string path)
         {
             try
             {
-                return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+                var attributes = DirectoryEnumerator.ReadAttributes(path);
+                return attributes != uint.MaxValue && (attributes & 0x400) != 0;
             }
             catch (Exception exception) when (
                 exception is IOException ||
                 exception is UnauthorizedAccessException ||
                 exception is ArgumentException ||
                 exception is NotSupportedException ||
+                exception is System.ComponentModel.Win32Exception ||
                 exception is System.Security.SecurityException)
             {
                 return false;
@@ -316,6 +327,9 @@ namespace QuickLook.Plugin.FolderViewer
         {
             resolvedPath = null;
             if (DirectoryStatisticsScanner.IsNetworkPath(path))
+                return false;
+            var attributes = DirectoryEnumerator.ReadAttributes(path);
+            if (attributes != uint.MaxValue && (attributes & PathPolicy.RecallOrOffline) != 0)
                 return false;
 
             using (var handle = CreateFile(
@@ -342,11 +356,7 @@ namespace QuickLook.Plugin.FolderViewer
                         return false;
                 }
 
-                var value = buffer.ToString();
-                if (value.StartsWith("\\\\?\\UNC\\", StringComparison.OrdinalIgnoreCase))
-                    value = "\\\\" + value.Substring(8);
-                else if (value.StartsWith("\\\\?\\", StringComparison.OrdinalIgnoreCase))
-                    value = value.Substring(4);
+                var value = PathPolicy.ForQuery(buffer.ToString());
 
                 if (string.Equals(value, path, StringComparison.OrdinalIgnoreCase))
                     return false;
@@ -354,26 +364,6 @@ namespace QuickLook.Plugin.FolderViewer
                 resolvedPath = value;
                 return true;
             }
-        }
-
-        private static bool ReadExactly(Stream stream, byte[] buffer, int offset, int count)
-        {
-            while (count > 0)
-            {
-                var read = stream.Read(buffer, offset, count);
-                if (read == 0)
-                    return false;
-                offset += read;
-                count -= read;
-            }
-
-            return true;
-        }
-
-        private static bool FailIfNotCancelled(CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return false;
         }
 
         private static void ObserveAndDispose(Task task, CancellationTokenSource cancellation)
@@ -387,27 +377,6 @@ namespace QuickLook.Plugin.FolderViewer
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
-        }
-
-        private static uint ReadUInt32(byte[] buffer, int offset)
-        {
-            return (uint)(buffer[offset] |
-                buffer[offset + 1] << 8 |
-                buffer[offset + 2] << 16 |
-                buffer[offset + 3] << 24);
-        }
-
-        private static ulong ReadUInt64(byte[] buffer, int offset)
-        {
-            return ReadUInt32(buffer, offset) | ((ulong)ReadUInt32(buffer, offset + 4) << 32);
-        }
-
-        private static void WriteUInt32(byte[] buffer, int offset, uint value)
-        {
-            buffer[offset] = (byte)value;
-            buffer[offset + 1] = (byte)(value >> 8);
-            buffer[offset + 2] = (byte)(value >> 16);
-            buffer[offset + 3] = (byte)(value >> 24);
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]

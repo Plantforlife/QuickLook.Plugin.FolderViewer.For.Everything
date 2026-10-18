@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using Microsoft.Win32.SafeHandles;
 
@@ -20,10 +21,15 @@ namespace QuickLook.Plugin.FolderViewer
         public static DirectoryReadResult ReadForPreview(
             string path,
             CancellationToken cancellationToken,
-            int limit = DefaultPreviewLimit)
+            int limit = DefaultPreviewLimit,
+            FileEntrySorter sorter = null,
+            Action<IReadOnlyList<FileEntry>> firstBatch = null)
         {
+            if (limit < 1) throw new ArgumentOutOfRangeException(nameof(limit));
             var entries = new List<FileEntry>(Math.Min(limit, 1024));
-            var outcome = Enumerate(path, cancellationToken, limit + 1, item =>
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            var published = false;
+            var outcome = Enumerate(path, cancellationToken, limit == int.MaxValue ? limit : limit + 1, item =>
             {
                 if (entries.Count >= limit)
                     return false;
@@ -35,10 +41,15 @@ namespace QuickLook.Plugin.FolderViewer
                     item.IsReparsePoint,
                     item.IsDirectory ? (long?)null : item.Size,
                     item.ModifiedDate));
+                if (!published && firstBatch != null && (entries.Count >= 128 || started.ElapsedMilliseconds >= 150))
+                {
+                    published = true;
+                    firstBatch((sorter ?? FileEntrySorter.Default).Sort(entries));
+                }
                 return true;
             });
 
-            entries.Sort();
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (outcome.WasTruncated)
             {
@@ -46,14 +57,15 @@ namespace QuickLook.Plugin.FolderViewer
                     Strings.Format("TruncatedNotice", limit.ToString("N0"))));
             }
 
-            return new DirectoryReadResult(entries, outcome.ErrorCode, outcome.WasTruncated);
+            return new DirectoryReadResult((sorter ?? FileEntrySorter.Default).Sort(entries), outcome.ErrorCode, outcome.WasTruncated);
         }
 
         public static DirectoryEnumerationOutcome Enumerate(
             string path,
             CancellationToken cancellationToken,
             int maximumItems,
-            Func<DirectoryItem, bool> visitor)
+            Func<DirectoryItem, bool> visitor,
+            bool statisticsOnly = false)
         {
             if (string.IsNullOrWhiteSpace(path))
                 throw new ArgumentException("A directory path is required.", nameof(path));
@@ -104,7 +116,7 @@ namespace QuickLook.Plugin.FolderViewer
 
                     if (!IsDotEntry(findData.cFileName))
                     {
-                        if (visited >= maximumItems || !visitor(ToDirectoryItem(normalizedPath, findData)))
+                        if (visited >= maximumItems || !visitor(ToDirectoryItem(normalizedPath, findData, statisticsOnly)))
                             return new DirectoryEnumerationOutcome(0, true);
 
                         visited++;
@@ -138,15 +150,36 @@ namespace QuickLook.Plugin.FolderViewer
 
         private static string NormalizeDirectoryPath(string path)
         {
-            var fullPath = Path.GetFullPath(path);
-            var root = Path.GetPathRoot(fullPath);
-            if (string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase))
-                return fullPath;
-
-            return fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            // QuickLook controls the CLR path switches. Native normalization also works
+            // when the host retains .NET Framework's legacy MAX_PATH behavior.
+            var buffer = new StringBuilder(512);
+            var length = GetFullPathName(path, buffer.Capacity, buffer, IntPtr.Zero);
+            if (length == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (length >= buffer.Capacity)
+            {
+                buffer = new StringBuilder(checked((int)length + 1));
+                length = GetFullPathName(path, buffer.Capacity, buffer, IntPtr.Zero);
+                if (length == 0 || length >= buffer.Capacity) throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            var fullPath = buffer.ToString();
+            var trimmed = fullPath.TrimEnd('\\', '/');
+            return trimmed.EndsWith(":", StringComparison.Ordinal) ? trimmed + "\\" : trimmed;
         }
 
-        private static DirectoryItem ToDirectoryItem(string parentPath, WIN32_FIND_DATA data)
+        internal static uint ReadAttributes(string path) => GetFileAttributes(ToExtendedPath(NormalizeDirectoryPath(path)));
+
+        internal static bool CanScanRoot(string path)
+        {
+            var normalized = ToExtendedPath(NormalizeDirectoryPath(path));
+            var attributes = GetFileAttributes(normalized);
+            if (attributes == uint.MaxValue) return true; // enumeration reports the access error
+            if ((attributes & 0x400) == 0) return PathPolicy.CanScanDirectory(attributes, 0);
+            using (var handle = FindFirstFileEx(normalized.TrimEnd('\\'), FINDEX_INFO_LEVELS.FindExInfoBasic,
+                out var data, FINDEX_SEARCH_OPS.FindExSearchNameMatch, IntPtr.Zero, 0))
+                return !handle.IsInvalid && PathPolicy.CanScanDirectory(data.dwFileAttributes, data.dwReserved0);
+        }
+
+        private static DirectoryItem ToDirectoryItem(string parentPath, WIN32_FIND_DATA data, bool statisticsOnly)
         {
             var attributes = (FileAttributes)data.dwFileAttributes;
             var isDirectory = (attributes & FileAttributes.Directory) != 0;
@@ -158,7 +191,7 @@ namespace QuickLook.Plugin.FolderViewer
 
             try
             {
-                modifiedDate = DateTime.FromFileTimeUtc(fileTime).ToLocalTime();
+                modifiedDate = statisticsOnly ? DateTime.MinValue : DateTime.FromFileTimeUtc(fileTime).ToLocalTime();
             }
             catch (ArgumentOutOfRangeException)
             {
@@ -167,11 +200,11 @@ namespace QuickLook.Plugin.FolderViewer
 
             return new DirectoryItem(
                 data.cFileName,
-                Path.Combine(parentPath, data.cFileName),
+                statisticsOnly && !isDirectory ? null : parentPath.TrimEnd('\\') + "\\" + data.cFileName,
                 isDirectory,
                 (attributes & FileAttributes.ReparsePoint) != 0,
                 size,
-                modifiedDate);
+                modifiedDate, data.dwFileAttributes, data.dwReserved0);
         }
 
         private static string ToExtendedPath(string path)
@@ -183,6 +216,12 @@ namespace QuickLook.Plugin.FolderViewer
 
             return "\\\\?\\" + path;
         }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFullPathName(string path, int size, StringBuilder buffer, IntPtr filePart);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFileAttributes(string path);
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern SafeFindHandle FindFirstFileEx(
@@ -256,7 +295,7 @@ namespace QuickLook.Plugin.FolderViewer
             bool isDirectory,
             bool isReparsePoint,
             long size,
-            DateTime modifiedDate)
+            DateTime modifiedDate, uint attributes = 0, uint reparseTag = 0)
         {
             Name = name;
             FullPath = fullPath;
@@ -264,6 +303,8 @@ namespace QuickLook.Plugin.FolderViewer
             IsReparsePoint = isReparsePoint;
             Size = size;
             ModifiedDate = modifiedDate;
+            Attributes = attributes;
+            ReparseTag = reparseTag;
         }
 
         public string Name { get; }
@@ -272,6 +313,8 @@ namespace QuickLook.Plugin.FolderViewer
         public bool IsReparsePoint { get; }
         public long Size { get; }
         public DateTime ModifiedDate { get; }
+        public uint Attributes { get; }
+        public uint ReparseTag { get; }
     }
 
     internal readonly struct DirectoryEnumerationOutcome

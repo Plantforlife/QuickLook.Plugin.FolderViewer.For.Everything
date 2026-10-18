@@ -6,7 +6,6 @@
     <UserControl.Resources>
         <local:SizePrettyPrintConverter x:Key="SizePrettyPrintConverter" />
         <local:DatePrintConverter x:Key="DatePrintConverter" />
-        <local:FileToIconConverter x:Key="FileToIconConverter" />
 
         <HierarchicalDataTemplate DataType="{x:Type local:FileEntry}"
                                   ItemsSource="{Binding Children}">
@@ -17,15 +16,8 @@
                     <ColumnDefinition Width="110" />
                     <ColumnDefinition Width="170" />
                 </Grid.ColumnDefinitions>
-                <Image Grid.Column="0" Width="16" Height="16"
-                       HorizontalAlignment="Left" VerticalAlignment="Center">
-                    <Image.Source>
-                        <MultiBinding Converter="{StaticResource FileToIconConverter}">
-                            <Binding Path="FullPath" />
-                            <Binding Path="IsFolder" />
-                        </MultiBinding>
-                    </Image.Source>
-                </Image>
+                <local:FileIcon Grid.Column="0" Width="16" Height="16"
+                                HorizontalAlignment="Left" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" Text="{Binding Name}"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 <TextBlock Grid.Column="2"
@@ -98,8 +90,16 @@
                             Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TreeView}}" />
                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                     <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                    <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+                    <EventSetter Event="Loaded" Handler="OnItemLoaded" />
                     <EventSetter Event="Expanded" Handler="OnItemExpanded" />
+                    <EventSetter Event="Collapsed" Handler="OnItemCollapsed" />
                     <EventSetter Event="MouseDoubleClick" Handler="OnItemMouseDoubleClick" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
+                            <Setter Property="IsEnabled" Value="False" />
+                        </DataTrigger>
+                    </Style.Triggers>
                 </Style>
             </TreeView.ItemContainerStyle>
         </TreeView>

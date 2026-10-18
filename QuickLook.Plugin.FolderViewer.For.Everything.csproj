@@ -70,6 +70,11 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Converters.cs" />
+    <Compile Include="PathPolicy.cs" />
+    <Compile Include="IoWorker.cs" />
+    <Compile Include="EverythingEndpoint.cs" />
+    <Compile Include="FolderSizeQueue.cs" />
+    <Compile Include="FileIcon.cs" />
     <Compile Include="DirectoryEnumerator.cs" />
     <Compile Include="DirectoryStatisticsScanner.cs" />
     <Compile Include="EverythingFolderSizeProvider.cs" />
