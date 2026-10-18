@@ -12,17 +12,12 @@
 
 ### 相比原版的主要改动
 
-**目录加载：** 从初次预览时递归构建目录树，改为先读取当前层级、展开时再加载子目录。原生 `FindFirstFileEx` 在一次枚举中获取名称、属性、大小和修改时间。
-
-**大小与统计：** 增加 Everything 1.5 SDK3 命名管道和 1.4/1.5 `WM_COPYDATA` 后备协议，异步填充文件夹大小与递归数量。查询采用有界队列、连接复用、超时、取消及离线退避。
-
-**本地回退：** 统计与目录列表分离，使用低 I/O 优先级并分片暂停；网络路径不自动递归扫描。跳过链接、未知重解析点和需召回的云目录，允许遍历已下载的云目录，并标明部分统计。
-
-**界面与交互：** 使用 WPF 回收虚拟化、后台排序和按需淘汰的折叠分支缓存，保留选择与展开状态。提供 20 种语言翻译，并增加圆角选中行、双击展开、Ctrl＋双击打开、实时滚动及紧凑文件夹菜单。
-
-**生命周期与兼容性：** 补充取消、重复 `View()`、幂等清理和 Dispatcher 更新边界，处理访问拒绝、路径删除、长路径、IPC 断开和关闭竞争。Shell 图标异步加载并按类型和 DPI 缓存。
-
-**工程与验证：** 固定 net462 构建引用程序集，增加 x86/x64 回归测试和 Windows CI，并检查安装包只包含四个插件运行文件。性能结论区分响应速度、完整耗时和统计可靠性。
+- **目录加载：** 从初次预览时递归构建目录树，改为先读取当前层级、展开时再加载子目录。原生 `FindFirstFileEx` 在一次枚举中获取名称、属性、大小和修改时间。
+- **大小与统计：** 增加 Everything 1.5 SDK3 命名管道和 1.4/1.5 `WM_COPYDATA` 后备协议，异步填充文件夹大小与递归数量。查询采用有界队列、连接复用、超时、取消及离线退避。
+- **本地回退：** 统计与目录列表分离，使用低 I/O 优先级并分片暂停；网络路径不自动递归扫描。跳过链接、未知重解析点和需召回的云目录，允许遍历已下载的云目录，并标明部分统计。
+- **界面与交互：** 使用 WPF 回收虚拟化、后台排序和按需淘汰的折叠分支缓存，保留选择与展开状态。提供 20 种语言翻译，并增加圆角选中行、双击展开、Ctrl＋双击打开、实时滚动及紧凑文件夹菜单。
+- **生命周期与兼容性：** 补充取消、重复 `View()`、幂等清理和 Dispatcher 更新边界，处理访问拒绝、路径删除、长路径、IPC 断开和关闭竞争。Shell 图标异步加载并按类型和 DPI 缓存。
+- **工程与验证：** 固定 net462 构建引用程序集，增加 x86/x64 回归测试和 Windows CI，并检查安装包只包含四个插件运行文件。性能结论区分响应速度、完整耗时和统计可靠性。
 
 ### 性能说明
 
@@ -40,8 +35,6 @@ AI 辅助开发不会取代或免除原项目及第三方组件的版权、许�
 
 ## English
 
-*AI modification notice*
-
 **This is an AI-modified fork of the original `QuickLook.Plugin.FolderViewer`. Added, refactored, and optimized code in this fork was generated and iteratively refined by OpenAI models through Codex, initially using GPT-5.6 Sol.**
 
 This project is based on [adyanth/QuickLook.Plugin.FolderViewer](https://github.com/adyanth/QuickLook.Plugin.FolderViewer). It aims to reduce folder-preview latency, use the [Everything](https://www.voidtools.com/) index for sizes and counts, and control background resource use.
@@ -50,17 +43,12 @@ The human maintainer supplies requirements, selects the intended behavior, and m
 
 ### Main changes from the original plugin
 
-**Directory loading:** Instead of recursively building the directory tree during the initial preview, the fork reads the current level first and loads subfolders on expansion. Native `FindFirstFileEx` obtains names, attributes, sizes, and modification times in one enumeration.
-
-**Sizes and statistics:** Everything 1.5 SDK3 named pipes and a 1.4/1.5 `WM_COPYDATA` fallback asynchronously fill folder sizes and recursive counts. Queries use bounded queues, connection reuse, timeouts, cancellation, and offline backoff.
-
-**Local fallback:** Statistics run separately from the directory listing, with low I/O priority and resumable slices. Network paths do not trigger automatic recursive scans. Links, unknown reparse points, and cloud directories requiring recall are skipped; hydrated cloud folders can be traversed, and partial statistics are identified.
-
-**Interface and interaction:** WPF recycling virtualization, background sorting, and eviction of folded branches limit retained work while preserving selection and expansion. The interface includes translations for 20 languages, rounded selection, double-click expansion, Ctrl + double-click opening, live scrolling, and a compact folder menu.
-
-**Lifecycle and compatibility:** The fork adds cancellation, repeated `View()` safety, idempotent cleanup, and Dispatcher update boundaries. It handles access denial, deleted paths, long paths, IPC disconnects, and shutdown races. Shell icons load asynchronously and are cached by type and DPI.
-
-**Build and validation:** Pinned net462 reference assemblies, x86/x64 regression checks, and Windows CI support the build. Packaging checks restrict the archive to four plugin runtime files. Performance conclusions distinguish responsiveness, full completion time, and statistics reliability.
+- **Directory loading:** Instead of recursively building the directory tree during the initial preview, the fork reads the current level first and loads subfolders on expansion. Native `FindFirstFileEx` obtains names, attributes, sizes, and modification times in one enumeration.
+- **Sizes and statistics:** Everything 1.5 SDK3 named pipes and a 1.4/1.5 `WM_COPYDATA` fallback asynchronously fill folder sizes and recursive counts. Queries use bounded queues, connection reuse, timeouts, cancellation, and offline backoff.
+- **Local fallback:** Statistics run separately from the directory listing, with low I/O priority and resumable slices. Network paths do not trigger automatic recursive scans. Links, unknown reparse points, and cloud directories requiring recall are skipped; hydrated cloud folders can be traversed, and partial statistics are identified.
+- **Interface and interaction:** WPF recycling virtualization, background sorting, and eviction of folded branches limit retained work while preserving selection and expansion. The interface includes translations for 20 languages, rounded selection, double-click expansion, Ctrl + double-click opening, live scrolling, and a compact folder menu.
+- **Lifecycle and compatibility:** The fork adds cancellation, repeated `View()` safety, idempotent cleanup, and Dispatcher update boundaries. It handles access denial, deleted paths, long paths, IPC disconnects, and shutdown races. Shell icons load asynchronously and are cached by type and DPI.
+- **Build and validation:** Pinned net462 reference assemblies, x86/x64 regression checks, and Windows CI support the build. Packaging checks restrict the archive to four plugin runtime files. Performance conclusions distinguish responsiveness, full completion time, and statistics reliability.
 
 ### Performance notes
 
