@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -145,6 +146,11 @@ namespace QuickLook.Plugin.FolderViewer
             if (_disposed || !(sender is FrameworkElement header) || !(header.Tag is SortColumn column)) return;
             ChangeSort(column, column == _sorter.Column && !_sorter.Descending);
             args.Handled = true;
+        }
+
+        private void OnScrollChanged(object sender, ScrollChangedEventArgs args)
+        {
+            if (args.HorizontalChange != 0) headerOffset.X = -args.HorizontalOffset;
         }
 
         internal void ChangeSort(SortColumn column, bool descending)
@@ -324,14 +330,38 @@ namespace QuickLook.Plugin.FolderViewer
             modifiedArrow.Text = _sorter.Column == SortColumn.Modified ? arrow : string.Empty;
         }
 
-        private void OnItemMouseDoubleClick(object sender, MouseButtonEventArgs args)
+        private void OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs args)
         {
-            if (_disposed || !(sender is TreeViewItem item) || !item.IsSelected ||
-                !(item.DataContext is FileEntry entry) || string.IsNullOrEmpty(entry.FullPath)) return;
+            if (_disposed || args.ClickCount != 2) return;
+            // Handle the second press before TreeViewItem's built-in double-click toggle.
+            // Resolve the nearest container so nested rows cannot activate their parent.
+            var source = args.OriginalSource as DependencyObject;
+            while (source != null && !(source is TreeViewItem))
+            {
+                if (source is ToggleButton) return; // The disclosure arrow keeps its single-click behavior.
+                source = source is Visual ? VisualTreeHelper.GetParent(source) : LogicalTreeHelper.GetParent(source);
+            }
+            if (source is TreeViewItem item)
+                args.Handled = ActivateItem(item, Keyboard.Modifiers, OpenPath);
+        }
+
+        internal bool ActivateItem(TreeViewItem item, ModifierKeys modifiers, Action<string> openPath)
+        {
+            if (_disposed || !(item.DataContext is FileEntry entry) || string.IsNullOrEmpty(entry.FullPath))
+                return false;
+            item.IsSelected = true;
+            if (entry.IsFolder && (modifiers & ModifierKeys.Control) == 0)
+                item.IsExpanded = !item.IsExpanded;
+            else
+                openPath(entry.FullPath);
+            return true;
+        }
+
+        private static void OpenPath(string path)
+        {
             try
             {
-                Process.Start(new ProcessStartInfo(entry.FullPath) { UseShellExecute = true });
-                args.Handled = true;
+                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
             }
             catch (Exception error) when (error is Win32Exception || error is InvalidOperationException) { }
         }

@@ -75,6 +75,7 @@
     <Compile Include="EverythingEndpoint.cs" />
     <Compile Include="FolderSizeQueue.cs" />
     <Compile Include="FileIcon.cs" />
+    <Compile Include="FolderMenu.cs" />
     <Compile Include="DirectoryEnumerator.cs" />
     <Compile Include="DirectoryStatisticsScanner.cs" />
     <Compile Include="EverythingFolderSizeProvider.cs" />
@@ -115,6 +116,10 @@
   </ItemGroup>
   <ItemGroup>
     <Page Include="FileListView.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="FolderMenu.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>

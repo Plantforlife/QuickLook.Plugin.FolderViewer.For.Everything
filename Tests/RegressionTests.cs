@@ -11,6 +11,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using System.Xml.Linq;
 
@@ -18,6 +20,131 @@ namespace QuickLook.Plugin.FolderViewer.Tests
 {
     internal static partial class Program
     {
+        private static void TestFolderActivation()
+        {
+            using (var view = new FileListView())
+            {
+                var folder = Entry("folder", true);
+                var child = Entry("child", true);
+                folder.TryBeginLoading();
+                folder.CompleteLoading(new[] { child });
+                view.SetSortedItems(new[] { folder }, view.CurrentSorter);
+                Layout(view);
+                var tree = (TreeView)view.FindName("treeView");
+                var item = (TreeViewItem)tree.ItemContainerGenerator.ContainerFromItem(folder);
+                string opened = null;
+                Action<string> open = path => opened = path;
+                Assert(view.ActivateItem(item, ModifierKeys.None, open), "A folder row should handle activation.");
+                Assert(folder.IsExpanded && opened == null, "Double-click must only expand a folder.");
+                Layout(view);
+                var childItem = (TreeViewItem)item.ItemContainerGenerator.ContainerFromItem(child);
+                view.ActivateItem(childItem, ModifierKeys.None, open);
+                Assert(child.IsExpanded && folder.IsExpanded, "Nested activation must leave its parent expanded.");
+                view.ActivateItem(item, ModifierKeys.Control, open);
+                AssertEqual(folder.FullPath, opened);
+                Assert(folder.IsExpanded, "Ctrl-double-click must not toggle expansion.");
+                opened = null;
+                view.ActivateItem(item, ModifierKeys.None, open);
+                Assert(!folder.IsExpanded && opened == null, "Double-click must also collapse a folder.");
+
+                var file = Entry("file.txt", false);
+                view.SetSortedItems(new[] { file }, view.CurrentSorter);
+                Layout(view);
+                item = (TreeViewItem)tree.ItemContainerGenerator.ContainerFromItem(file);
+                view.ActivateItem(item, ModifierKeys.None, open);
+                AssertEqual(file.FullPath, opened);
+                view.Dispose();
+                opened = null;
+                Assert(!view.ActivateItem(item, ModifierKeys.Control, open) && opened == null,
+                    "A disposed preview must not launch anything.");
+            }
+        }
+
+        private static void TestLiveScrolling()
+        {
+            using (var view = new FileListView())
+            {
+                var entries = Enumerable.Range(0, 25000).Select(i => Entry("folder" + i.ToString("D5"), true)).ToArray();
+                view.SetSortedItems(entries, view.CurrentSorter);
+                Layout(view);
+                var tree = (TreeView)view.FindName("treeView");
+                var scroll = VisualDescendant<ScrollViewer>(tree);
+                Assert(scroll != null && !ScrollViewer.GetIsDeferredScrollingEnabled(scroll),
+                    "Thumb dragging must update the viewport immediately.");
+                var item = (TreeViewItem)tree.ItemContainerGenerator.ContainerFromIndex(0);
+                item.IsSelected = true;
+                var selection = (Border)item.Template.FindName("selection", item);
+                AssertEqual(new CornerRadius(4), selection.CornerRadius);
+                Assert(selection.Background != null, "Selected rows must retain their highlight.");
+                scroll.ScrollToVerticalOffset(10000);
+                Layout(view);
+                Assert(scroll.VerticalOffset > 0, "The viewport must move before scrolling finishes.");
+                view.Measure(new Size(600, 400));
+                view.Arrange(new Rect(0, 0, 600, 400));
+                view.UpdateLayout();
+                scroll.ScrollToHorizontalOffset(80);
+                view.UpdateLayout();
+                AssertEqual(-scroll.HorizontalOffset, ((TranslateTransform)view.FindName("headerOffset")).X);
+                Assert(entries.Count(e => tree.ItemContainerGenerator.ContainerFromItem(e) != null) < 200,
+                    "Live scrolling must keep row virtualization.");
+            }
+        }
+
+        private static T VisualDescendant<T>(DependencyObject root) where T : DependencyObject
+        {
+            if (root is T result) return result;
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            {
+                var found = VisualDescendant<T>(VisualTreeHelper.GetChild(root, i));
+                if (found != null) return found;
+            }
+            return null;
+        }
+
+        private static void TestFolderMenu()
+        {
+            var content = new Border();
+            var window = new Window { Content = content };
+            NameScope.SetNameScope(window, new NameScope());
+            var original = new ContextMenu();
+            var button = new Button { ContextMenu = original };
+            var reload = new MenuItem { Header = "Reload" };
+            var copy = new MenuItem { Header = "Copy as path" };
+            original.Items.Add(new MenuItem { Header = "Show media info" });
+            original.Items.Add(reload);
+            original.Items.Add(copy);
+            window.RegisterName("buttonMore", button);
+            window.RegisterName("moreItemReload", reload);
+            window.RegisterName("moreItemCopyAsPath", copy);
+            window.Resources["WindowTextForeground"] = Brushes.White;
+            window.Resources["MainWindowBackgroundNoTransparent"] = Brushes.Black;
+            var reloads = 0;
+            var copies = 0;
+            reload.Click += (s, e) => reloads++;
+            copy.Click += (s, e) => copies++;
+            using (var attached = FolderMenu.Attach(content))
+            {
+                Assert(attached != null && !ReferenceEquals(original, button.ContextMenu), "Folder menu should attach.");
+                var menu = button.ContextMenu;
+                AssertEqual(2, menu.Items.Count);
+                AssertEqual(Brushes.White, menu.Foreground);
+                AssertEqual(Brushes.Black, menu.Background);
+                menu.Measure(new Size(1400, 1000));
+                menu.Arrange(new Rect(menu.DesiredSize));
+                menu.UpdateLayout();
+                Assert(menu.DesiredSize.Width <= 360 && menu.DesiredSize.Height < 150,
+                    "The menu must size to its two actions instead of covering the preview.");
+                ((MenuItem)menu.Items[0]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                ((MenuItem)menu.Items[1]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                AssertEqual(1, reloads);
+                AssertEqual(1, copies);
+            }
+            Assert(ReferenceEquals(original, button.ContextMenu), "Leaving folder preview must restore the host menu.");
+            AssertEqual(3, original.Items.Count);
+            window.Content = null;
+            window.Close();
+        }
+
         private static void TestPathPolicy()
         {
             Assert(!PathPolicy.IsNetwork(@"\\?\C:\Windows"), "Extended local paths must remain local.");

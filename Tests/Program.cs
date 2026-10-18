@@ -57,6 +57,9 @@ namespace QuickLook.Plugin.FolderViewer.Tests
             Run("nested selection and overlapping sorts", () => WithDispatcher(TestNestedSorting));
             Run("translations and culture fallback", TestTranslations);
             Run("stale statistics callbacks", () => WithDispatcher(TestStaleStatistics));
+            Run("folder activation gestures", () => WithDispatcher(TestFolderActivation));
+            Run("rounded rows and live virtualized scrolling", () => WithDispatcher(TestLiveScrolling));
+            Run("compact folder menu and host restoration", () => WithDispatcher(TestFolderMenu));
 
             Console.WriteLine();
             Console.WriteLine(_failed == 0 ? "All tests passed." : _failed + " test(s) failed.");

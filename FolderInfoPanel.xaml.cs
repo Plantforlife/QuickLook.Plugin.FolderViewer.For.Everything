@@ -25,6 +25,7 @@ namespace QuickLook.Plugin.FolderViewer
         private bool _disposed;
         private bool _indexedCounts;
         private long? _indexedTotalSize;
+        private FolderMenu _folderMenu;
 
         public FolderInfoPanel(string path)
         {
@@ -38,6 +39,8 @@ namespace QuickLook.Plugin.FolderViewer
             numFiles.Text = Strings.Format("Stat_Files", calculating);
 
             Resources.MergedDictionaries.Clear();
+            Loaded += OnLoaded;
+            Unloaded += OnUnloaded;
             fileListView.Configure(LoadChildrenAsync, _cancellationToken);
 
             _indexedStatisticsTask = LoadIndexedStatisticsAsync();
@@ -58,12 +61,29 @@ namespace QuickLook.Plugin.FolderViewer
                 return;
 
             _disposed = true;
+            Loaded -= OnLoaded;
+            Unloaded -= OnUnloaded;
+            _folderMenu?.Dispose();
+            _folderMenu = null;
             _cancellation.Cancel();
             _sizeQueue.Dispose();
             fileListView.Dispose();
             _folderSizeProvider.Dispose();
             _cancellation.Dispose();
             GC.SuppressFinalize(this);
+        }
+
+        private void OnLoaded(object sender, RoutedEventArgs args)
+        {
+            if (_disposed) return;
+            _folderMenu?.Dispose();
+            _folderMenu = FolderMenu.Attach(this);
+        }
+
+        private void OnUnloaded(object sender, RoutedEventArgs args)
+        {
+            _folderMenu?.Dispose();
+            _folderMenu = null;
         }
 
         private async void LoadRootAsync()
